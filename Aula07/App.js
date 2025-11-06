@@ -1,13 +1,15 @@
-import React, { useCallback, useMemo } from "react";
+import React, { useCallback, useMemo, useState, memo } from "react";
 import {
   SafeAreaView,
   View,
   Text,
-  FlatList,
+  SectionList,
   StyleSheet,
   StatusBar,
   Pressable,
-  useColorScheme,
+  TextInput,
+  useWindowDimensions,
+  Platform,
 } from "react-native";
 
 const rawProdutos = [
@@ -23,114 +25,186 @@ const rawProdutos = [
 
 const categoryColors = {
   Eletrônicos: { bg: "#eef2ff", border: "#dbe3ff", text: "#3b5bfd" },
-  Vestuário: { bg: "#f0fdf4", border: "#ddf7e2", text: "#15803d" },
-  Casa: { bg: "#fff7ed", border: "#ffebd6", text: "#c2410c" },
-  Calçados: { bg: "#f5f3ff", border: "#e7e3ff", text: "#6d28d9" },
+  Vestuário:   { bg: "#f0fdf4", border: "#ddf7e2", text: "#15803d" },
+  Casa:        { bg: "#fff7ed", border: "#ffebd6", text: "#c2410c" },
+  Calçados:    { bg: "#f5f3ff", border: "#e7e3ff", text: "#6d28d9" },
 };
 
 const formatBRL = (v) =>
   new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v);
 
-export default function App() {
-  const produtos = useMemo(() => rawProdutos, []);
-  const keyExtractor = useCallback((item) => item.id, []);
+// ——— responsividade simples por largura
+const useScale = () => {
+  const { width } = useWindowDimensions();
+  const base = 375; // referência
+  const scale = Math.max(0.85, Math.min(1.25, width / base));
+  const ms = (n) => Math.round(n * scale);
+  return { ms };
+};
 
-  const renderItem = useCallback(({ item }) => {
-    const cat = categoryColors[item.categoria] || {
-      bg: "#eef2ff",
-      border: "#dbe3ff",
-      text: "#3b5bfd",
-    };
-    return (
-      <Pressable style={({ pressed }) => [styles.card, { transform: [{ scale: pressed ? 0.99 : 1 }] }]} android_ripple={{ color: "#00000010" }}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.nome}>{item.nome}</Text>
-          <View style={[styles.categoriaPill, { backgroundColor: cat.bg, borderColor: cat.border }]}>
-            <Text style={[styles.categoriaTexto, { color: cat.text }]}>{item.categoria}</Text>
-          </View>
-        </View>
-        <Text style={styles.preco}>{formatBRL(item.preco)}</Text>
-      </Pressable>
-    );
-  }, []);
-
-  const ItemSeparator = useCallback(() => <View style={{ height: 10 }} />, []);
-  const ListHeader = useCallback(() => (
-    <View style={{ marginBottom: 8 }}>
-      <Text style={styles.titulo}>CATALOGO DE PRODUTOS</Text>
-    </View>
-  ), [produtos.length]);
+// ——— Item do produto (memoizado)
+const ProductCard = memo(function ProductCard({ item, ms }) {
+  const cat = categoryColors[item.categoria] || {
+    bg: "#eef2ff", border: "#dbe3ff", text: "#3b5bfd",
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <Pressable
+      style={({ pressed }) => [
+        styles.card,
+        { padding: ms(14), borderRadius: ms(14), transform: [{ scale: pressed ? 0.99 : 1 }] },
+      ]}
+      android_ripple={{ color: "#00000010" }}
+    >
+      <View style={[styles.cardHeader, { marginBottom: ms(6) }]}>
+        <Text style={[styles.nome, { fontSize: ms(16) }]} numberOfLines={1}>
+          {item.nome}
+        </Text>
+        <View
+          style={[
+            styles.categoriaPill,
+            { paddingHorizontal: ms(10), paddingVertical: ms(4), borderRadius: 999,
+              backgroundColor: cat.bg, borderColor: cat.border, borderWidth: 1 },
+          ]}
+        >
+          <Text style={[styles.categoriaTexto, { fontSize: ms(12), color: cat.text }]}>
+            {item.categoria}
+          </Text>
+        </View>
+      </View>
+      <Text style={[styles.preco, { fontSize: ms(16) }]}>{formatBRL(item.preco)}</Text>
+    </Pressable>
+  );
+});
+
+// ——— Header da seção (memoizado)
+const SectionHeader = memo(function SectionHeader({ title, ms }) {
+  return (
+    <View style={[styles.sectionHeader, { paddingHorizontal: ms(12), paddingVertical: ms(8) }]}>
+      <Text style={[styles.sectionTitle, { fontSize: ms(13) }]}>{title}</Text>
+    </View>
+  );
+});
+
+export default function App() {
+  const [query, setQuery] = useState("");
+  const { ms } = useScale();
+
+  // 1) memoiza dados base
+  const produtos = useMemo(() => rawProdutos, []);
+
+  // 2) filtro por nome (case/acento-insensitive)
+  const normalize = (s) =>
+    (s || "").normalize("NFD").replace(/\p{Diacritic}/gu, "").toLowerCase();
+
+  const filtrados = useMemo(() => {
+    const q = normalize(query);
+    if (!q) return produtos;
+    return produtos.filter((p) => normalize(p.nome).includes(q));
+  }, [produtos, query]);
+
+  // 3) agrupamento por categoria para SectionList
+  const sections = useMemo(() => {
+    const map = new Map();
+    for (const p of filtrados) {
+      if (!map.has(p.categoria)) map.set(p.categoria, []);
+      map.get(p.categoria).push(p);
+    }
+    return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
+  }, [filtrados]);
+
+  // 4) callbacks memoizados
+  const renderItem = useCallback(
+    ({ item }) => <ProductCard item={item} ms={ms} />,
+    [ms]
+  );
+
+  const renderSectionHeader = useCallback(
+    ({ section }) => <SectionHeader title={section.title} ms={ms} />,
+    [ms]
+  );
+
+  const keyExtractor = useCallback((item) => item.id, []);
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: "#CBE9FF" }]}>
       <StatusBar barStyle="dark-content" />
-      <FlatList
-        data={produtos}
+
+      {/* Campo de busca */}
+      <View style={{ paddingHorizontal: ms(16), paddingTop: ms(12), paddingBottom: ms(8) }}>
+        <Text style={[styles.titulo, { fontSize: ms(22) }]}>CATÁLOGO DE PRODUTOS</Text>
+        <TextInput
+          placeholder="Buscar por nome..."
+          placeholderTextColor="#64748B"
+          value={query}
+          onChangeText={setQuery}
+          style={{
+            marginTop: ms(10),
+            height: ms(44),
+            borderRadius: ms(10),
+            paddingHorizontal: ms(12),
+            fontSize: ms(14),
+            backgroundColor: "#ffffff",
+            borderWidth: 1,
+            borderColor: "#94A3B8",
+          }}
+          clearButtonMode={Platform.OS === "ios" ? "while-editing" : "never"}
+        />
+      </View>
+
+      {/* Lista agrupada por categoria */}
+      <SectionList
+        sections={sections}
         keyExtractor={keyExtractor}
         renderItem={renderItem}
-        ItemSeparatorComponent={ItemSeparator}
-        ListHeaderComponent={ListHeader}
-        contentContainerStyle={styles.content}
+        renderSectionHeader={renderSectionHeader}
+        stickySectionHeadersEnabled
+        contentContainerStyle={{ paddingHorizontal: ms(16), paddingBottom: ms(32) }}
+        ItemSeparatorComponent={() => <View style={{ height: ms(10) }} />}
+        SectionSeparatorComponent={() => <View style={{ height: ms(8) }} />}
+        initialNumToRender={12}
+        windowSize={8}
+        maxToRenderPerBatch={20}
+        removeClippedSubviews
+        keyboardShouldPersistTaps="handled"
+        ListEmptyComponent={() => (
+          <View style={{ padding: ms(16) }}>
+            <Text style={{ color: "#334155", fontSize: ms(14) }}>
+              Nenhum produto encontrado.
+            </Text>
+          </View>
+        )}
       />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#CBE9FF", // 💙 azul-bebê
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 32,
-  },
-  titulo: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#0F172A",
-  },
-  subtitulo: {
-    fontSize: 14,
-    color: "#334155",
-    marginTop: 2,
-  },
+  container: { flex: 1 },
+  titulo: { fontWeight: "700", color: "#0F172A" },
   card: {
     backgroundColor: "#ffffff",
-    borderRadius: 14,
-    padding: 14,
     shadowColor: "#000",
     shadowOpacity: 0.08,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
     elevation: 2,
   },
-  cardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginBottom: 6,
+  cardHeader: { flexDirection: "row", alignItems: "center", gap: 8 },
+  nome: { flex: 1, fontWeight: "600", color: "#0F172A" },
+  categoriaPill: { },
+  categoriaTexto: { fontWeight: "600" },
+  preco: { fontWeight: "700", color: "#059669", marginTop: 2 },
+  sectionHeader: {
+    backgroundColor: "#E2E8F0",
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: "#CBD5E1",
   },
-  nome: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: "600",
+  sectionTitle: {
     color: "#0F172A",
-  },
-  categoriaPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  categoriaTexto: {
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  preco: {
-    fontSize: 16,
     fontWeight: "700",
-    color: "#059669",
-    marginTop: 2,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
   },
 });
