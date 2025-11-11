@@ -1,0 +1,1 @@
+source={ imagem ? { uri: imagem } : require('./assets/avatar.png') }
